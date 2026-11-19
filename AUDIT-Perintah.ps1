@@ -1,7 +1,8 @@
-# AUDIT-Perintah.ps1 — Audit kualitas seluruh perintah IT Support Toolkit
-# 1) Parse-check setiap command PowerShell tertanam (tanpa mengeksekusi)
-# 2) bash -n setiap Cmds Linux/macOS (cek sintaks shell)
-# 3) -RunChecks : jalankan semua perintah CHECK Windows headless (dengan timeout)
+# AUDIT-Perintah.ps1 - Audit kualitas seluruh skrip & perintah IT Support Toolkit
+# 1) Parse-check AST seluruh skrip PowerShell (.ps1) & JSON template
+# 2) Parse-check setiap command PowerShell tertanam (tanpa mengeksekusi)
+# 3) bash -n setiap Cmds Linux/macOS & JALANKAN-Linux-Mac.sh (bila bash tersedia)
+# 4) -RunChecks : jalankan semua perintah CHECK Windows headless (dengan timeout)
 # Hasil: konsol + AUDIT-Report.txt
 param(
     [switch]$RunChecks,
@@ -16,15 +17,40 @@ function Remove-EmojiT {
 $src = Join-Path $PSScriptRoot 'IT-Support-Toolkit.ps1'
 if (-not (Test-Path $src)) { Write-Host "File tidak ditemukan: $src"; exit 1 }
 
-# --- Parse script utama ---
-$tokens = $null; $errs = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($src, [ref]$tokens, [ref]$errs)
-if ($errs.Count) {
-    Write-Host "SCRIPT UTAMA ADA PARSE ERROR:" -ForegroundColor Red
-    $errs | ForEach-Object { Write-Output ("  LINE {0}: {1}" -f $_.Extent.StartLineNumber, $_.Message) }
-    exit 1
+$report = New-Object System.Collections.Generic.List[string]
+$fail = 0
+
+# --- 0) Parse seluruh skrip PowerShell utama & pendamping ---
+foreach ($psFile in @('IT-Support-Toolkit.ps1', 'WEB-Dashboard.ps1', 'AUDIT-Perintah.ps1', 'BUAT-EXE.ps1')) {
+    $fp = Join-Path $PSScriptRoot $psFile
+    if (-not (Test-Path $fp)) { continue }
+    $t = $null; $e = $null
+    $parsed = [System.Management.Automation.Language.Parser]::ParseFile($fp, [ref]$t, [ref]$e)
+    if ($e.Count) {
+        $fail += $e.Count
+        foreach ($err in $e) {
+            $msg = "PARSE-FILE | {0} | LINE {1}: {2}" -f $psFile, $err.Extent.StartLineNumber, $err.Message
+            $report.Add($msg); Write-Host $msg -ForegroundColor Red
+        }
+    } else {
+        Write-Host ("[OK] Parse " + $psFile) -ForegroundColor Green
+    }
+    if ($psFile -eq 'IT-Support-Toolkit.ps1') { $ast = $parsed }
 }
-Write-Host "[OK] Parse script utama" -ForegroundColor Green
+if (-not $ast) { exit 1 }
+
+# --- Validasi CONTOH-kustom.json ---
+$contohJson = Join-Path $PSScriptRoot 'CONTOH-kustom.json'
+if (Test-Path $contohJson) {
+    try {
+        [void](Get-Content -Raw -Path $contohJson | ConvertFrom-Json)
+        Write-Host '[OK] Validasi JSON: CONTOH-kustom.json' -ForegroundColor Green
+    } catch {
+        $fail++
+        $msg = 'JSON-ERROR | CONTOH-kustom.json | ' + $_.Exception.Message
+        $report.Add($msg); Write-Host $msg -ForegroundColor Red
+    }
+}
 
 # --- Ambil katalog via AST (TANPA menjalankan script utama) ---
 $assign = $ast.FindAll({ param($a) $a -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)
@@ -32,20 +58,16 @@ $catalog = @(); $nixCatalog = @()
 foreach ($a in $assign) {
     $name = $a.Left.VariablePath.UserPath
     $rhs  = $a.Right.Expression.Extent.Text
-    # Skip assignment gabungan (contoh: $Categories += @{...} untuk kustom)
     if ($name -eq 'Categories' -and $rhs -notmatch '\$Categories' -and $catalog.Count -eq 0) {
         $catalog = Invoke-Expression $rhs
     }
-    if ($name -eq 'CategoriesNix' -and $nixCatalog.Count -eq 0) {
+    if ($name -eq 'CategoriesNix' -and $rhs -notmatch '\$CategoriesNix' -and $nixCatalog.Count -eq 0) {
         $nixCatalog = Invoke-Expression $rhs
     }
 }
 $winCount = @($catalog | ForEach-Object { $_.Items.Count } | Measure-Object -Sum).Sum
 $nixCount = @($nixCatalog | ForEach-Object { $_.Items.Count } | Measure-Object -Sum).Sum
 Write-Host ("[OK] Katalog dimuat: Windows " + $winCount + " perintah, Linux/macOS " + $nixCount + " perintah")
-
-$report = New-Object System.Collections.Generic.List[string]
-$fail = 0
 
 # --- 1) Parse-check command PowerShell tertanam ---
 $psCount = 0
@@ -69,33 +91,58 @@ foreach ($cat in $catalog) {
 }
 Write-Host ("[OK] Embedded PS command dicek: " + $psCount)
 
-# --- 2) bash -n untuk Cmds Linux/macOS ---
-$nixChecked = 0
-foreach ($cat in $nixCatalog) {
-    foreach ($it in $cat.Items) {
-        if (-not $it.Cmds) { continue }
-        $sh = Join-Path $env:TEMP ("ittk-audit-{0}.sh" -f [guid]::NewGuid().ToString('N'))
-        [System.IO.File]::WriteAllText($sh, (($it.Cmds -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-        $out = & bash -n $sh 2>&1 | Out-String
-        $code = $LASTEXITCODE
-        Remove-Item $sh -ErrorAction SilentlyContinue
-        $nixChecked++
-        if ($code -ne 0) {
+# --- 2) bash -n untuk Cmds Linux/macOS & launcher .sh (bila bash bisa dijalankan) ---
+$bashReady = $false
+try {
+    $bCmd = Get-Command bash -ErrorAction SilentlyContinue
+    if ($bCmd) {
+        $null = & bash -c "true" 2>$null
+        if ($LASTEXITCODE -eq 0) { $bashReady = $true }
+    }
+} catch { $bashReady = $false }
+
+if ($bashReady) {
+    $launcherSh = Join-Path $PSScriptRoot 'JALANKAN-Linux-Mac.sh'
+    if (Test-Path $launcherSh) {
+        $lOut = (& bash -n $launcherSh 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) {
             $fail++
-            $msg = "BASH-SYNTAX | {0} | {1} | {2}" -f $cat.Title, (Remove-EmojiT $it.Name), ($out.Trim())
+            $msg = "BASH-SYNTAX | JALANKAN-Linux-Mac.sh | " + $lOut.Trim()
             $report.Add($msg); Write-Host $msg -ForegroundColor Red
+        } else {
+            Write-Host '[OK] bash -n JALANKAN-Linux-Mac.sh' -ForegroundColor Green
         }
     }
+    $nixChecked = 0
+    $tmpBase = if ($env:TEMP) { $env:TEMP } else { '/tmp' }
+    foreach ($cat in $nixCatalog) {
+        foreach ($it in $cat.Items) {
+            if (-not $it.Cmds) { continue }
+            $sh = Join-Path $tmpBase ("ittk-audit-{0}.sh" -f [guid]::NewGuid().ToString('N'))
+            [System.IO.File]::WriteAllText($sh, (($it.Cmds -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+            $out = (& bash -n $sh 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Remove-Item $sh -ErrorAction SilentlyContinue
+            $nixChecked++
+            if ($code -ne 0) {
+                $fail++
+                $msg = "BASH-SYNTAX | {0} | {1} | {2}" -f (Remove-EmojiT $cat.Title), (Remove-EmojiT $it.Name), ($out.Trim())
+                $report.Add($msg); Write-Host $msg -ForegroundColor Red
+            }
+        }
+    }
+    Write-Host ("[OK] Item Linux/macOS dicek via bash -n: " + $nixChecked)
+} else {
+    Write-Host '[SKIP] bash tidak tersedia di lingkungan ini - pemeriksaan bash -n dilewati.' -ForegroundColor Yellow
 }
-Write-Host ("[OK] Item Linux/macOS dicek: " + $nixChecked)
 
 # --- 3) Jalankan perintah CHECK Windows (headless, dengan timeout) ---
 if ($RunChecks) {
     foreach ($cat in $catalog) {
         foreach ($it in $cat.Items) {
             if ($it.Type -ne 'check') { continue }
-            if ($it.Build) { continue }   # butuh input - hanya bisa via GUI
-            $runName = ($it.Name -replace '[\uD800-\uDBFF][\uDC00-\uDFFF]', '' -replace '[\u2000-\u2BFF\uFE0F]', '').Trim()
+            if ($it.Build) { continue }
+            $runName = Remove-EmojiT $it.Name
             $job = Start-Job -ScriptBlock {
                 param($s, $r)
                 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s -Run $r 2>&1 | Out-String

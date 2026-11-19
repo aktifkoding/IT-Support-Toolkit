@@ -1,0 +1,33 @@
+name: Audit Sintaks & Katalog
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Jalankan AUDIT-Perintah.ps1 (AST PowerShell + JSON + bash -n)
+        shell: pwsh
+        run: ./AUDIT-Perintah.ps1
+
+      - name: Uji -List mode lintas platform (Linux & macOS)
+        shell: pwsh
+        run: |
+          $env:ITTK_FORCE_OS = 'Linux'
+          $lin = pwsh -NoProfile -File ./IT-Support-Toolkit.ps1 -List
+          if ($LASTEXITCODE -ne 0 -or -not ($lin -match 'Diagnosa Pintar')) {
+            throw 'Pengujian -List Linux gagal.'
+          }
+          $env:ITTK_FORCE_OS = 'MacOS'
+          $mac = pwsh -NoProfile -File ./IT-Support-Toolkit.ps1 -List
+          if ($LASTEXITCODE -ne 0 -or -not ($mac -match 'Homebrew')) {
+            throw 'Pengujian -List macOS gagal.'
+          }
+          Write-Host '[OK] Pengujian -List Linux dan macOS berhasil.'

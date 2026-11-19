@@ -1,4 +1,4 @@
-# BUAT-EXE.ps1 — Build versi .exe dari IT Support Toolkit via modul PS2EXE
+﻿# BUAT-EXE.ps1 — Build versi .exe dari IT Support Toolkit via modul PS2EXE
 #
 # PERINGATAN PENTING (baca sebelum pakai):
 # 1. Antivirus / Windows Defender HAMPIR PASTI menandai file .exe hasil PS2EXE
@@ -48,7 +48,7 @@ try {
         -title 'IT Support Toolkit' `
         -description 'Kumpulan command IT Support Windows - cek & perbaiki sekali klik' `
         -company 'IT Support Toolkit' `
-        -version '6.0.0.0'
+        -version '7.0.0.0'
     Write-Host ''
     Write-Host "SELESAI: $out" -ForegroundColor Green
     Write-Host 'Ingat: file .exe bisa kena false-positive antivirus - uji dulu di PC target.' -ForegroundColor Yellow

@@ -31,14 +31,15 @@ function Remove-Emoji {
 }
 
 # =====================================================================
-#  IT SUPPORT TOOLKIT v1.0
-#  Kumpulan command IT Support Windows - tinggal klik, langsung jalan.
-#  Cek (diagnosa) & Perbaiki (fix): jaringan, sistem, disk, windows
-#  update, printer, keamanan, bersih-bersih, user & utilitas.
+#  IT SUPPORT TOOLKIT v7.0
+#  Kumpulan command IT Support lintas platform - tinggal klik, langsung jalan.
+#  Cek (diagnosa) & Perbaiki (fix): jaringan, remote/LAN, sistem, disk,
+#  windows update, printer, keamanan, bersih-bersih, ekstra, user & utilitas.
 #
-#  Cara pakai   : double-click JALANKAN-IT-Toolkit.bat
+#  Cara pakai   : double-click JALANKAN-IT-Toolkit.bat (Windows)
+#                 atau bash JALANKAN-Linux-Mac.sh (Linux / macOS)
 #  Mode script  : -List (daftar perintah) / -Run "nama" (tanpa GUI)
-#  Butuh        : Windows 10/11 + PowerShell 5.1, sebagai Administrator
+#  Butuh        : Windows 10/11 + PS 5.1 (Admin), atau Linux/macOS + pwsh
 # =====================================================================
 
 # ---------------------------------------------------------------------
@@ -189,7 +190,7 @@ $Categories = @(
             }
             @{
                 Name = '📄 Buat Laporan Diagnosa (Export)'
-                Desc = 'Kumpulkan data PC lengkap, simpan TXT di Desktop'
+                Desc = 'Kumpulkan data PC lengkap, simpan HTML di Desktop'
                 Type = 'check'
                 Cmds = @(
                     'reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" /v ProductName'
@@ -536,6 +537,35 @@ $Categories = @(
                 )
                 Note = 'Bisa sangat panjang. Berguna cek domain mencurigakan yang baru diakses.'
             }
+            @{
+                Name = '🌍 Cek IP Publik & Info ISP'
+                Desc = 'IP keluar (WAN), ISP, lokasi - cek VPN aktif/bocor'
+                Type = 'check'
+                Cmds = @(
+                    'powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri ''https://ipinfo.io/json'' -TimeoutSec 8 -ErrorAction Stop; Write-Host (''IP Publik : '' + $r.ip); Write-Host (''ISP / Org : '' + $r.org); Write-Host (''Lokasi    : '' + $r.city + '', '' + $r.region + '', '' + $r.country); Write-Host (''Timezone  : '' + $r.timezone) } catch { try { $ip = Invoke-RestMethod -Uri ''https://api.ipify.org'' -TimeoutSec 8; Write-Host (''IP Publik : '' + $ip) } catch { Write-Host (''GAGAL: '' + $_.Exception.Message) } }"'
+                )
+            }
+            @{
+                Name = '🔐 Cek Status VPN & Adapter Virtual'
+                Desc = 'Daftar profil VPN Windows + adapter virtual (WireGuard/OpenVPN/TAP)'
+                Type = 'check'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$v = @(Get-VpnConnection -ErrorAction SilentlyContinue); if ($v.Count -gt 0) { $v | Format-Table Name,ServerAddress,TunnelType,ConnectionStatus -AutoSize } else { Write-Host ''Tidak ada profil VPN bawaan Windows.'' }; Write-Host ''=== ADAPTER VIRTUAL / VPN ===''; $va = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match ''VPN|TAP|TUN|WireGuard|OpenVPN|Tailscale|ZeroTier|Fortinet|Cisco|AnyConnect|GlobalProtect|Virtual'' }); if ($va.Count -gt 0) { $va | Format-Table Name,InterfaceDescription,Status,LinkSpeed -AutoSize } else { Write-Host ''Tidak ada adapter VPN pihak ketiga terdeteksi.'' }"'
+                )
+            }
+            @{
+                Name = '🔒 Cek Sertifikat SSL/TLS Domain'
+                Desc = 'Masa berlaku & issuer sertifikat HTTPS (port 443)'
+                Type = 'check'
+                Input = @(
+                    @{ Prompt = 'Domain / Host tujuan (tanpa https://):'; Default = 'google.com' }
+                )
+                Build = {
+                    param($v)
+                    $h = ($v[0] -replace '^https?://', '' -replace '/.*$', '').Trim()
+                    @('powershell -NoProfile -Command "try { $tcp = New-Object System.Net.Sockets.TcpClient(''' + $h + ''', 443); $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, ({ $true })); $ssl.AuthenticateAsClient(''' + $h + '''); $c = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate); $sisa = [int](($c.NotAfter - (Get-Date)).TotalDays); Write-Host (''Host      : ' + $h + '''); Write-Host (''Subject   : '' + $c.Subject); Write-Host (''Issuer    : '' + $c.Issuer); Write-Host (''Berlaku   : '' + $c.NotBefore.ToString(''yyyy-MM-dd'') + '' s/d '' + $c.NotAfter.ToString(''yyyy-MM-dd'')); Write-Host (''Sisa hari : '' + $sisa + '' hari''); if ($sisa -lt 0) { Write-Host ''PERINGATAN: Sertifikat SUDAH KEDALUWARSA!'' } elseif ($sisa -le 30) { Write-Host ''PERHATIAN: Sertifikat akan kedaluwarsa <= 30 hari.'' }; $ssl.Close(); $tcp.Close() } catch { Write-Host (''GAGAL cek SSL ' + $h + ': '' + $_.Exception.Message) }"')
+                }
+            }
         )
     }
     @{
@@ -571,6 +601,20 @@ $Categories = @(
                     'arp -a'
                 )
                 Note = 'MAC address bisa dicek vendornya lewat situs lookup MAC untuk identifikasi perangkat.'
+            }
+            @{
+                Name = '⚡ Wake-on-LAN (Nyalakan PC LAN)'
+                Desc = 'Kirim Magic Packet UDP port 9 ke MAC address tujuan'
+                Type = 'fix'
+                Input = @(
+                    @{ Prompt = 'MAC Address tujuan (contoh: AA-BB-CC-DD-EE-FF):'; Default = 'AA-BB-CC-DD-EE-FF' }
+                )
+                Build = {
+                    param($v)
+                    $macClean = ($v[0] -replace '[^0-9A-Fa-f]', '').ToUpper()
+                    @('powershell -NoProfile -Command "$m = ''' + $macClean + '''; if ($m.Length -ne 12) { Write-Host ''Format MAC tidak valid (butuh 12 digit hex, mis. AA-BB-CC-DD-EE-FF).''; exit }; $bytes = 0..5 | ForEach-Object { [Convert]::ToByte($m.Substring($_ * 2, 2), 16) }; $pkt = ([byte[]](@(0xFF)*6)) + ($bytes * 16); $u = New-Object System.Net.Sockets.UdpClient; $u.EnableBroadcast = $true; [void]$u.Send($pkt, $pkt.Length, [System.Net.IPAddress]::Broadcast, 9); $u.Close(); Write-Host (''Magic Packet WoL dikirim ke MAC '' + $m + '' (UDP broadcast port 9). Pastikan Wake-on-LAN aktif di BIOS & NIC PC tujuan.'')"')
+                }
+                Note = 'PC tujuan harus tersambung kabel LAN dan Wake-on-LAN aktif di BIOS/UEFI + pengaturan adapter jaringan.'
             }
         )
     }
@@ -814,7 +858,7 @@ $Categories = @(
                 Desc = 'Cek error file system tanpa mengubah apa pun'
                 Type = 'check'
                 Cmds = @(
-                    'powershell -NoProfile -Command "try { Repair-Volume -DriveLetter C -Scan -ErrorAction Stop } catch { Write-Host (''GAGAL: '' + $_.Exception.Message); Write-Host ''Scan drive butuh hak Administrator (GUI toolkit selalu admin).'' }"'
+                    'powershell -NoProfile -Command "$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); if (-not $isAdmin) { Write-Host ''Scan drive C butuh hak Administrator (jalankan lewat GUI toolkit atau PowerShell Admin).''; exit }; try { Repair-Volume -DriveLetter C -Scan -ErrorAction Stop } catch { Write-Host (''GAGAL: '' + $_.Exception.Message) }"'
                 )
             }
             @{
@@ -952,7 +996,7 @@ $Categories = @(
                 Desc = 'Dokumen yang sedang/belum tercetak'
                 Type = 'check'
                 Cmds = @(
-                    'powershell -NoProfile -Command "$j = Get-Printer | ForEach-Object { Get-PrintJob -PrinterName $_.Name -ErrorAction SilentlyContinue }; if ($j) { $j | Format-Table PrinterName,Id,DocumentName,UserName,JobStatus -AutoSize } else { Write-Host ''Antrian kosong - tidak ada dokumen nyangkut.'' }"'
+                    'powershell -NoProfile -Command "$sp = Get-Service -Name Spooler -ErrorAction SilentlyContinue; if (-not $sp -or $sp.Status -ne ''Running'') { Write-Host ''Layanan Print Spooler sedang tidak berjalan. Jalankan tombol Restart Print Spooler terlebih dahulu.''; exit }; try { $pr = @(Get-Printer -ErrorAction Stop); if ($pr.Count -eq 0) { Write-Host ''Tidak ada printer terpasang.''; exit }; $j = @($pr | ForEach-Object { Get-PrintJob -PrinterName $_.Name -ErrorAction SilentlyContinue }); if ($j.Count -gt 0) { $j | Format-Table PrinterName,Id,DocumentName,UserName,JobStatus -AutoSize } else { Write-Host ''Antrian kosong - tidak ada dokumen nyangkut.'' } } catch { Write-Host (''Info antrian printer tidak tersedia: '' + $_.Exception.Message) }"'
                 )
             }
             @{
@@ -1202,6 +1246,25 @@ $Categories = @(
                     'del /f /s /q "%SystemRoot%\Prefetch\*"'
                     'powershell -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue; Write-Host ''Recycle Bin dikosongkan.'' "'
                 )
+            }
+            @{
+                Name = '💬 Clear Cache Microsoft Teams'
+                Desc = 'Hapus cache Teams Classic & New Teams - fix error login/blank'
+                Type = 'fix'
+                Cmds = @(
+                    'taskkill /f /im ms-teams.exe 2>nul & taskkill /f /im Teams.exe 2>nul & echo Teams ditutup.'
+                    'powershell -NoProfile -Command "$paths = @((Join-Path $env:APPDATA ''Microsoft\Teams\Cache''), (Join-Path $env:APPDATA ''Microsoft\Teams\GPUCache''), (Join-Path $env:APPDATA ''Microsoft\Teams\Code Cache''), (Join-Path $env:APPDATA ''Microsoft\Teams\IndexedDB''), (Join-Path $env:LOCALAPPDATA ''Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams'')); $n = 0; foreach ($p in $paths) { if (Test-Path $p) { Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue; Write-Host (''Dibersihkan: '' + $p); $n++ } }; if ($n -eq 0) { Write-Host ''Folder cache Microsoft Teams tidak ditemukan.'' } else { Write-Host ''Selesai - silakan buka ulang Microsoft Teams.'' }"'
+                )
+                Note = 'Aman: tidak menghapus chat/akun server. Buka ulang Microsoft Teams setelah selesai.'
+            }
+            @{
+                Name = '🌐 Clear Cache Browser (Chrome & Edge)'
+                Desc = 'Hapus cache Chrome & Edge saja (bookmark/password tetap aman)'
+                Type = 'fix'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$targets = @((Join-Path $env:LOCALAPPDATA ''Google\Chrome\User Data\Default\Cache\Cache_Data''), (Join-Path $env:LOCALAPPDATA ''Google\Chrome\User Data\Default\Code Cache''), (Join-Path $env:LOCALAPPDATA ''Microsoft\Edge\User Data\Default\Cache\Cache_Data''), (Join-Path $env:LOCALAPPDATA ''Microsoft\Edge\User Data\Default\Code Cache'')); $n = 0; foreach ($t in $targets) { if (Test-Path $t) { Remove-Item -Path (Join-Path $t ''*'') -Recurse -Force -ErrorAction SilentlyContinue; Write-Host (''Dibersihkan: '' + $t); $n++ } }; if ($n -eq 0) { Write-Host ''Folder cache Chrome/Edge tidak ditemukan.'' } else { Write-Host ''Cache browser selesai dibersihkan (tutup browser dulu jika ada file terkunci).'' }"'
+                )
+                Note = 'Bookmark, riwayat, cookies, dan password tersimpan TIDAK dihapus.'
             }
             @{
                 Name = '🗄️ Buka Storage Sense'
@@ -1456,6 +1519,69 @@ $Categories = @(
                     'powershell -NoProfile -Command "Write-Host ''Hibernasi aktif kembali.''"'
                 )
             }
+            @{
+                Name = '📦 Winget: Export Daftar Aplikasi (JSON)'
+                Desc = 'Backup daftar aplikasi terinstall ke Desktop\Backup-Aplikasi.json'
+                Type = 'fix'
+                Cmds = @(
+                    'winget export -o "%USERPROFILE%\Desktop\Backup-Aplikasi.json" --accept-source-agreements'
+                )
+                Note = 'Jalankan sebelum install ulang PC. Pulihkan di PC baru lewat tombol Winget: Import Daftar Aplikasi.'
+            }
+            @{
+                Name = '📥 Winget: Import Daftar Aplikasi (JSON)'
+                Desc = 'Install ulang aplikasi massal dari file Backup-Aplikasi.json'
+                Type = 'fix'
+                Input = @(
+                    @{ Prompt = 'Path file JSON hasil export Winget:'; Default = '%USERPROFILE%\Desktop\Backup-Aplikasi.json' }
+                )
+                Build = {
+                    param($v)
+                    @('winget import -i "' + $v[0] + '" --accept-package-agreements --accept-source-agreements')
+                }
+                Note = 'Butuh internet. Proses instalasi massal bisa memakan waktu 10-45 menit.'
+            }
+            @{
+                Name = '🔖 Backup Bookmark Chrome & Edge'
+                Desc = 'Salin file Bookmarks Chrome/Edge ke Desktop\Backup-Bookmarks'
+                Type = 'fix'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$desk = [Environment]::GetFolderPath(''Desktop''); if (-not $desk) { $desk = Join-Path $env:USERPROFILE ''Desktop'' }; $dst = Join-Path $desk ''Backup-Bookmarks''; New-Item -ItemType Directory -Path $dst -Force | Out-Null; $map = @{ ''Chrome-Bookmarks.json'' = (Join-Path $env:LOCALAPPDATA ''Google\Chrome\User Data\Default\Bookmarks''); ''Edge-Bookmarks.json'' = (Join-Path $env:LOCALAPPDATA ''Microsoft\Edge\User Data\Default\Bookmarks'') }; $ok = 0; foreach ($k in $map.Keys) { if (Test-Path $map[$k]) { Copy-Item -Path $map[$k] -Destination (Join-Path $dst $k) -Force; Write-Host (''Disalin: '' + $k); $ok++ } }; if ($ok -eq 0) { Write-Host ''File bookmark Chrome/Edge tidak ditemukan.'' } else { Write-Host (''Tersimpan di: '' + $dst) }"'
+                )
+            }
+            @{
+                Name = '🖨️ Backup Daftar & Port Printer'
+                Desc = 'Ekspor daftar printer, driver & IP port ke Desktop\Backup-Printer.txt'
+                Type = 'check'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$sp = Get-Service -Name Spooler -ErrorAction SilentlyContinue; if (-not $sp -or $sp.Status -ne ''Running'') { Write-Host ''Layanan Print Spooler sedang tidak berjalan.''; exit }; $desk = [Environment]::GetFolderPath(''Desktop''); if (-not $desk) { $desk = Join-Path $env:USERPROFILE ''Desktop'' }; $out = Join-Path $desk ''Backup-Printer.txt''; try { $lines = @(''=== DAFTAR PRINTER ===''); $lines += (Get-Printer -ErrorAction Stop | Format-Table Name,DriverName,PortName,Shared,ShareName -AutoSize | Out-String); $lines += ''=== PORT PRINTER (TCP/IP) ===''; $lines += (Get-PrinterPort -ErrorAction SilentlyContinue | Format-Table Name,PrinterHostAddress,PortNumber -AutoSize | Out-String); [System.IO.File]::WriteAllText($out, ($lines -join \"`r`n\"), (New-Object System.Text.UTF8Encoding $true)); Write-Output ($lines -join \"`r`n\"); Write-Host (''Tersimpan di: '' + $out) } catch { Write-Host (''GAGAL ekspor printer: '' + $_.Exception.Message) }"'
+                )
+            }
+            @{
+                Name = '📑 Cek Status Aktivasi Microsoft Office'
+                Desc = 'Jalankan ospp.vbs /dstatus - cek lisensi & sisa masa aktif Office'
+                Type = 'check'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$cands = @(''C:\Program Files\Microsoft Office\Office16\OSPP.VBS'', ''C:\Program Files (x86)\Microsoft Office\Office16\OSPP.VBS'', ''C:\Program Files\Microsoft Office\Office15\OSPP.VBS'', ''C:\Program Files (x86)\Microsoft Office\Office15\OSPP.VBS''); $f = $cands | Where-Object { Test-Path $_ } | Select-Object -First 1; if (-not $f) { Write-Host ''Microsoft Office (OSPP.VBS) tidak ditemukan di lokasi standar.'' } else { Write-Host (''Menggunakan: '' + $f); & cscript.exe //nologo $f /dstatus }"'
+                )
+            }
+            @{
+                Name = '🛠️ Perbaikan Cepat Microsoft Office'
+                Desc = 'Jalankan Office Click-to-Run Quick Repair (tanpa butuh internet)'
+                Type = 'fix'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$c2r = ''C:\Program Files\Common Files\microsoft shared\ClickToRun\OfficeClickToRun.exe''; if (-not (Test-Path $c2r)) { Write-Host ''Office Click-to-Run tidak ditemukan. Buka Programs & Features (appwiz.cpl) untuk repair MSI.''; exit }; $cfg = Get-ItemProperty ''HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration'' -ErrorAction SilentlyContinue; $plat = if ($cfg.Platform) { $cfg.Platform } else { ''x64'' }; $cult = if ($cfg.ClientCulture) { $cfg.ClientCulture } else { ''en-us'' }; Write-Host (''Memulai Office Quick Repair ('' + $plat + '', '' + $cult + '')...''); Start-Process -FilePath $c2r -ArgumentList (''scenario=Repair platform='' + $plat + '' culture='' + $cult + '' RepairType=QuickRepair DisplayLevel=True'') "'
+                )
+                Note = 'Tutup Word, Excel, PowerPoint, dan Outlook sebelum menjalankan perbaikan.'
+            }
+            @{
+                Name = '📧 Cek Ukuran File OST/PST Outlook'
+                Desc = 'Cek ukuran mailbox lokal Outlook (peringatan jika mendekati 50 GB)'
+                Type = 'check'
+                Cmds = @(
+                    'powershell -NoProfile -Command "$doc = [Environment]::GetFolderPath(''MyDocuments''); if (-not $doc -and $env:USERPROFILE) { $doc = Join-Path $env:USERPROFILE ''Documents'' }; $dirs = @(); if ($env:LOCALAPPDATA) { $dirs += (Join-Path $env:LOCALAPPDATA ''Microsoft\Outlook'') }; if ($doc) { $dirs += (Join-Path $doc ''Outlook Files'') }; $files = @(); foreach ($d in $dirs) { if (Test-Path $d -ErrorAction SilentlyContinue) { $files += Get-ChildItem -Path $d -Include *.ost,*.pst -Recurse -ErrorAction SilentlyContinue } }; if ($files.Count -eq 0) { Write-Host ''Tidak ada file OST/PST Outlook ditemukan di folder standar.'' } else { $files | Sort-Object Length -Descending | ForEach-Object { $gb = [math]::Round($_.Length/1GB, 2); $warn = if ($gb -ge 40) { ''  [PERINGATAN: MENDEKATI BATAS 50 GB!]'' } else { '''' }; Write-Host ($gb.ToString(''0.00'') + '' GB  |  '' + $_.FullName + $warn) } }"'
+                )
+            }
         )
     }
     @{
@@ -1657,13 +1783,16 @@ $Categories = @(
 )
 
 # ---------------------------------------------------------------------
-# PERINTAH KUSTOM TIM (kustom.json) — opsional, untuk tim IT
-# Format: [ { "Name":"...", "Desc":"...", "Type":"fix", "Cmds":["..."], "Note":"..." } ]
+# PERINTAH KUSTOM TIM (kustom.json) - opsional, lintas platform (Win/Linux/MacOS)
+# Format: [ { "Name":"...", "Desc":"...", "Type":"fix", "OS":"Windows", "Cmds":["..."], "Note":"..." } ]
+# OS    : opsional ("Windows" default, atau "Linux", "MacOS", "All")
 # Type  : check / fix / danger / open  (open memakai "Target":"app.exe")
 # Salin CONTOH-kustom.json menjadi kustom.json lalu edit isinya.
 # ---------------------------------------------------------------------
-$KustomItems = @()
-$KustomFile  = Join-Path $script:AppRoot 'kustom.json'
+$KustomItemsWin   = @()
+$KustomItemsLinux = @()
+$KustomItemsMac   = @()
+$KustomFile       = Join-Path $script:AppRoot 'kustom.json'
 if (Test-Path $KustomFile) {
     try {
         $raw = Get-Content -Raw -Path $KustomFile | ConvertFrom-Json
@@ -1672,18 +1801,21 @@ if (Test-Path $KustomFile) {
             $t = [string]$k.Type
             if ($t -notin @('check', 'fix', 'danger', 'open')) { $t = 'check' }
             $kit = @{ Name = [string]$k.Name; Desc = [string]$k.Desc; Type = $t }
-            if ($k.Note)   { $kit.Note = [string]$k.Note }
+            if ($k.Note) { $kit.Note = [string]$k.Note }
             if ($t -eq 'open') { $kit.Target = [string]$k.Target }
             else { $kit.Cmds = @($k.Cmds | ForEach-Object { [string]$_ }) }
-            $KustomItems += $kit
+            $osTag = if ($k.OS) { [string]$k.OS } else { 'Windows' }
+            if ($osTag -eq 'All' -or $osTag -eq 'Windows') { $KustomItemsWin   += $kit }
+            if ($osTag -eq 'All' -or $osTag -eq 'Linux')   { $KustomItemsLinux += $kit }
+            if ($osTag -eq 'All' -or $osTag -eq 'MacOS')   { $KustomItemsMac   += $kit }
         }
     } catch {
-        $KustomItems = @()
+        $KustomItemsWin = @(); $KustomItemsLinux = @(); $KustomItemsMac = @()
         $script:KustomError = $_.Exception.Message
     }
 }
-if ($KustomItems.Count -gt 0) {
-    $Categories += @{ Key = 'kustom'; Title = '🧩 Kustom (Tim)'; Items = $KustomItems }
+if ($KustomItemsWin.Count -gt 0) {
+    $Categories += @{ Key = 'kustom'; Title = '🧩 Kustom (Tim)'; Items = $KustomItemsWin }
 }
 
 # ---------------------------------------------------------------------
@@ -1704,15 +1836,72 @@ $CategoriesNix = @(
             @{ Name = '🧽 Flush DNS Cache'; Desc = 'Restart systemd-resolved / flush cache'; Type = 'fix'; Cmds = @('systemctl restart systemd-resolved 2>/dev/null || resolvectl flush-caches 2>/dev/null || echo "systemd-resolved tidak ditemukan"') }
             @{ Name = '🛠️ Restart Layanan Jaringan'; Desc = 'Restart NetworkManager / networking'; Type = 'fix'; Cmds = @('systemctl restart NetworkManager 2>/dev/null || systemctl restart networking 2>/dev/null || echo "layanan jaringan tidak ditemukan"') }
             @{ Name = '⚙️ Set IP Statik (nmcli)'; Desc = 'IP manual + gateway + DNS via NetworkManager'; Type = 'danger'; Input = @(@{ Prompt = 'Nama koneksi (nmcli con show):'; Default = 'Wired connection 1' }, @{ Prompt = 'IP statik (x.x.x.x):' }, @{ Prompt = 'Gateway:' }, @{ Prompt = 'DNS:'; Default = '8.8.8.8' }); Build = { param($v) @('nmcli con mod "' + $v[0] + '" ipv4.method manual ipv4.addresses ' + $v[1] + '/24 ipv4.gateway ' + $v[2] + ' ipv4.dns ' + $v[3]), ('nmcli con up "' + $v[0] + '"') }; Note = 'Prefix /24 dipakai. Lihat nama koneksi dulu lewat tombol Status WiFi & Koneksi.' }
+            @{ Name = '🌍 Cek IP Publik & Speed Test (curl)'; Desc = 'IP keluar + ISP + tes unduh 10 MB via Cloudflare'; Type = 'check'; Cmds = @('curl -s --max-time 6 https://ipinfo.io/json || curl -s --max-time 6 https://api.ipify.org', 'echo ""', 'curl -o /dev/null -s -w "Download 10MB: %{speed_download} bytes/sec (waktu %{time_total}s)\n" --max-time 25 "https://speed.cloudflare.com/__down?bytes=10000000"') }
+            @{ Name = '🔒 Cek Sertifikat SSL Domain'; Desc = 'Cek masa berlaku sertifikat HTTPS via openssl'; Type = 'check'; Input = @(@{ Prompt = 'Domain / Host:'; Default = 'google.com' }); Build = { param($v) @('echo | openssl s_client -servername ' + $v[0] + ' -connect ' + $v[0] + ':443 2>/dev/null | openssl x509 -noout -subject -issuer -dates') } }
         )
     }
     @{
         Key = 'nixsys'; OS = 'Linux'; Title = '🖥️ Sistem'
         Items = @(
+            @{
+                Name = '🧠 Diagnosa Pintar + Rekomendasi'
+                Desc = 'Cek gateway/internet/DNS/disk/systemd failed & analisa otomatis'
+                Type = 'check'
+                Cmds = @(
+                    'echo "===MNET==="'
+                    'ping -c 4 8.8.8.8 || true'
+                    'echo "===MDNS==="'
+                    'getent hosts google.com || echo "DNS_FAIL"'
+                    'echo "===MDISK==="'
+                    'df -h /'
+                    'echo "ROOTPCT=$(df -P / | awk ''NR==2 {gsub(/%/,"",$5); print $5}'')"'
+                    'echo "===MFAIL==="'
+                    'systemctl --failed --no-legend --no-pager 2>/dev/null || true'
+                )
+                Analysis = {
+                    param($Text)
+                    $recs = @()
+                    if ($Text -match '100% packet loss|Network is unreachable') { $recs += 'Koneksi internet gagal: cek "Info IP & Interface" atau jalankan "Restart Layanan Jaringan".' }
+                    if ($Text -match 'DNS_FAIL') { $recs += 'DNS gagal resolve: jalankan "Flush DNS Cache" dan cek /etc/resolv.conf.' }
+                    if ($Text -match 'ROOTPCT=(\d+)') {
+                        if ([int]$Matches[1] -ge 85) { $recs += ('Disk root (/) terpakai ' + $Matches[1] + '%: jalankan "Folder /var Paling Besar" dan "Bersihkan Cache Paket & Log".') }
+                    }
+                    if ($Text -match '===MFAIL===\s+\S') { $recs += 'Ada layanan systemd berstatus failed: jalankan "Layanan Systemd Gagal (failed)" dan cek journalctl.' }
+                    if ($recs.Count -eq 0) { $recs += 'Semua hasil normal - tidak ada masalah terdeteksi.' }
+                    $recs
+                }
+            }
+            @{
+                Name = '📄 Export Laporan Diagnosa (HTML)'
+                Desc = 'Simpan laporan lengkap sistem ke HTML di Home/Desktop'
+                Type = 'check'
+                Cmds = @(
+                    'uname -a'
+                    'cat /etc/os-release 2>/dev/null || true'
+                    'uptime'
+                    'free -h'
+                    'df -h'
+                    'ip -brief address'
+                    'systemctl --failed --no-pager 2>/dev/null || true'
+                    'journalctl -p err -n 15 --no-pager 2>/dev/null || true'
+                )
+                PostRun = {
+                    param($Text)
+                    $baseDir = if ($env:HOME -and (Test-Path (Join-Path $env:HOME 'Desktop'))) { Join-Path $env:HOME 'Desktop' } elseif ($env:HOME) { $env:HOME } else { '/tmp' }
+                    $hn = try { (hostname).Trim() } catch { 'linux' }
+                    $path = Join-Path $baseDir ('Laporan-Diagnosa-{0}-{1:yyyyMMdd-HHmm}.html' -f $hn, (Get-Date))
+                    $esc = $Text.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;')
+                    $meta = 'Host: ' + $hn + ' &bull; OS: Linux &bull; Tanggal: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+                    $html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Laporan Diagnosa ' + $hn + '</title><style>body{font-family:sans-serif;background:#1e1e1e;color:#d4d4d4;padding:24px;margin:0}h1{color:#4fc1ff;font-size:20px;margin:0 0 8px}.meta{color:#9cdcfe;font-size:12px;margin-bottom:14px}pre{background:#141414;padding:16px;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-family:monospace;font-size:12px;border:1px solid #333}</style></head><body><h1>Laporan Diagnosa Komputer</h1><div class="meta">' + $meta + '</div><pre>' + $esc + '</pre></body></html>'
+                    [System.IO.File]::WriteAllText($path, $html, (New-Object System.Text.UTF8Encoding($false)))
+                    Write-Host ("Laporan HTML tersimpan: " + $path) -ForegroundColor Green
+                }
+            }
             @{ Name = 'ℹ️ Info Sistem Lengkap'; Desc = 'Kernel, distro, hostname'; Type = 'check'; Cmds = @('uname -a', 'cat /etc/os-release', 'hostnamectl 2>/dev/null || true') }
             @{ Name = '🧩 Hardware CPU/RAM/Disk'; Desc = 'CPU, memori, dan block device'; Type = 'check'; Cmds = @('lscpu | head -14', 'free -h', 'lsblk') }
             @{ Name = '🔥 Proses Pemakan Resource Teratas'; Desc = 'Top 10 proses by CPU & RAM'; Type = 'check'; Cmds = @('ps aux --sort=-%cpu | head -12', 'ps aux --sort=-%mem | head -12') }
             @{ Name = '⚙️ Layanan yang Berjalan'; Desc = 'systemd service state running'; Type = 'check'; Cmds = @('systemctl list-units --type=service --state=running --no-pager') }
+            @{ Name = '🚨 Layanan Systemd Gagal (failed)'; Desc = 'Daftar unit systemd yang error/failed'; Type = 'check'; Cmds = @('systemctl --failed --no-pager') }
             @{ Name = '📜 Log Error Terbaru (journal)'; Desc = '30 error terakhir dari journald'; Type = 'check'; Cmds = @('journalctl -p err -n 30 --no-pager') }
             @{ Name = '🧱 Log Kernel Error/Warning'; Desc = 'dmesg level error & warning'; Type = 'check'; Cmds = @('dmesg --level=err,warn 2>/dev/null | tail -30 || echo "dmesg butuh sudo di distro ini"') }
             @{ Name = '🔁 Riwayat Reboot'; Desc = 'Kapan saja PC di-restart'; Type = 'check'; Cmds = @('last reboot 2>/dev/null | head -10 || echo "last tidak tersedia"') }
@@ -1751,6 +1940,58 @@ $CategoriesNix = @(
     @{
         Key = 'macsys'; OS = 'MacOS'; Title = '🖥️ Sistem'
         Items = @(
+            @{
+                Name = '🧠 Diagnosa Pintar + Rekomendasi'
+                Desc = 'Cek internet, DNS, ruang disk /, dan firewall macOS + analisa otomatis'
+                Type = 'check'
+                Cmds = @(
+                    'echo "===MNET==="'
+                    'ping -c 4 8.8.8.8 || true'
+                    'echo "===MDNS==="'
+                    'dscacheutil -q host -a name google.com || echo "DNS_FAIL"'
+                    'echo "===MDISK==="'
+                    'df -h /'
+                    'echo "ROOTPCT=$(df -P / | awk ''NR==2 {gsub(/%/,"",$5); print $5}'')"'
+                    'echo "===MFW==="'
+                    '/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null || true'
+                )
+                Analysis = {
+                    param($Text)
+                    $recs = @()
+                    if ($Text -match '100\.0% packet loss|No route to host') { $recs += 'Internet gagal terhubung: cek "Info Jaringan" dan "Layanan & Interface Aktif".' }
+                    if ($Text -match 'DNS_FAIL') { $recs += 'DNS gagal resolve: jalankan "Flush DNS Cache" (kategori Jaringan).' }
+                    if ($Text -match 'ROOTPCT=(\d+)') {
+                        if ([int]$Matches[1] -ge 85) { $recs += ('Disk root (/) terpakai ' + $Matches[1] + '%: jalankan "Homebrew: Bersihkan Cache" atau kosongkan file besar.') }
+                    }
+                    if ($Text -match 'State = 0') { $recs += 'Application Firewall macOS dalam kondisi mati (disabled): aktifkan melalui System Settings > Network > Firewall.' }
+                    if ($recs.Count -eq 0) { $recs += 'Semua hasil normal - tidak ada masalah terdeteksi.' }
+                    $recs
+                }
+            }
+            @{
+                Name = '📄 Export Laporan Diagnosa (HTML)'
+                Desc = 'Simpan laporan sistem macOS ke file HTML di Desktop'
+                Type = 'check'
+                Cmds = @(
+                    'sw_vers'
+                    'uptime'
+                    'sysctl -n machdep.cpu.brand_string'
+                    'df -h'
+                    'ifconfig en0 2>/dev/null | head -10'
+                    'networksetup -listallnetworkservices'
+                )
+                PostRun = {
+                    param($Text)
+                    $baseDir = if ($env:HOME -and (Test-Path (Join-Path $env:HOME 'Desktop'))) { Join-Path $env:HOME 'Desktop' } elseif ($env:HOME) { $env:HOME } else { '/tmp' }
+                    $hn = try { (hostname).Trim() } catch { 'macos' }
+                    $path = Join-Path $baseDir ('Laporan-Diagnosa-{0}-{1:yyyyMMdd-HHmm}.html' -f $hn, (Get-Date))
+                    $esc = $Text.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;')
+                    $meta = 'Host: ' + $hn + ' &bull; OS: macOS &bull; Tanggal: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+                    $html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Laporan Diagnosa ' + $hn + '</title><style>body{font-family:-apple-system,sans-serif;background:#1e1e1e;color:#d4d4d4;padding:24px;margin:0}h1{color:#4fc1ff;font-size:20px;margin:0 0 8px}.meta{color:#9cdcfe;font-size:12px;margin-bottom:14px}pre{background:#141414;padding:16px;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-family:monospace;font-size:12px;border:1px solid #333}</style></head><body><h1>Laporan Diagnosa Komputer</h1><div class="meta">' + $meta + '</div><pre>' + $esc + '</pre></body></html>'
+                    [System.IO.File]::WriteAllText($path, $html, (New-Object System.Text.UTF8Encoding($false)))
+                    Write-Host ("Laporan HTML tersimpan: " + $path) -ForegroundColor Green
+                }
+            }
             @{ Name = 'ℹ️ Info Sistem macOS'; Desc = 'Versi macOS + hardware'; Type = 'check'; Cmds = @('sw_vers', 'system_profiler SPHardwareDataType 2>/dev/null | head -18') }
             @{ Name = '🧩 Hardware & Resource'; Desc = 'CPU, jumlah core, memori'; Type = 'check'; Cmds = @('sysctl -n machdep.cpu.brand_string', 'sysctl -n hw.ncpu hw.memsize', 'top -l 1 -s 0 | grep -E "PhysMem|CPU usage"') }
             @{ Name = '🔥 Proses Teratas (CPU)'; Desc = '12 proses pemakan CPU terbesar'; Type = 'check'; Cmds = @('ps aux | sort -rk3 | head -12') }
@@ -1767,6 +2008,8 @@ $CategoriesNix = @(
             @{ Name = '🎯 Ping Host'; Desc = 'Ping ke host/IP tertentu'; Type = 'check'; Input = @(@{ Prompt = 'Host / IP tujuan:'; Default = '8.8.8.8' }); Build = { param($v) @('ping -c 4 ' + $v[0]) } }
             @{ Name = '🔌 Tes Port Host'; Desc = 'Cek port TCP via nc'; Type = 'check'; Input = @(@{ Prompt = 'Host / IP:'; Default = '8.8.8.8' }, @{ Prompt = 'Port TCP:'; Default = '22' }); Build = { param($v) @('nc -z -G 3 ' + $v[0] + ' ' + $v[1] + ' 2>/dev/null && echo "Port ' + $v[1] + ' TERBUKA" || echo "Port ' + $v[1] + ' tertutup / host tidak dijawab"') } }
             @{ Name = '🧽 Flush DNS Cache'; Desc = 'Bersihkan cache DNS macOS'; Type = 'fix'; Cmds = @('sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder; echo "DNS cache macOS dibersihkan"') }
+            @{ Name = '🌍 Cek IP Publik & Speed Test (curl)'; Desc = 'IP keluar + ISP + tes unduh 10 MB via Cloudflare'; Type = 'check'; Cmds = @('curl -s --max-time 6 https://ipinfo.io/json || curl -s --max-time 6 https://api.ipify.org', 'echo ""', 'curl -o /dev/null -s -w "Download 10MB: %{speed_download} bytes/sec (waktu %{time_total}s)\n" --max-time 25 "https://speed.cloudflare.com/__down?bytes=10000000"') }
+            @{ Name = '🔒 Cek Sertifikat SSL Domain'; Desc = 'Cek masa berlaku sertifikat HTTPS via openssl'; Type = 'check'; Input = @(@{ Prompt = 'Domain / Host:'; Default = 'google.com' }); Build = { param($v) @('echo | openssl s_client -servername ' + $v[0] + ' -connect ' + $v[0] + ':443 2>/dev/null | openssl x509 -noout -subject -issuer -dates') } }
         )
     }
     @{
@@ -1781,15 +2024,23 @@ $CategoriesNix = @(
         Items = @(
             @{ Name = '📦 Cek Update macOS'; Desc = 'Daftar update software tersedia'; Type = 'check'; Cmds = @('softwareupdate -l') }
             @{ Name = '⬆️ Install Update macOS ⏱️'; Desc = 'Pasang semua update tersedia'; Type = 'fix'; Cmds = @('sudo softwareupdate -i -a'); Note = 'Butuh internet & bisa lama. Simpan pekerjaan dulu.' }
+            @{ Name = '🍺 Homebrew: Cek & Update Paket'; Desc = 'brew update && brew outdated'; Type = 'check'; Cmds = @('if command -v brew >/dev/null 2>&1; then brew update && brew outdated; else echo "Homebrew belum terpasang"; fi') }
+            @{ Name = '🧹 Homebrew: Bersihkan Cache (cleanup)'; Desc = 'brew cleanup - hapus versi lama & cache unduhan'; Type = 'fix'; Cmds = @('if command -v brew >/dev/null 2>&1; then brew cleanup; else echo "Homebrew belum terpasang"; fi') }
         )
     }
 )
+if ($KustomItemsLinux.Count -gt 0) {
+    $CategoriesNix += @{ Key = 'kustom_lin'; OS = 'Linux'; Title = '🧩 Kustom (Tim)'; Items = $KustomItemsLinux }
+}
+if ($KustomItemsMac.Count -gt 0) {
+    $CategoriesNix += @{ Key = 'kustom_mac'; OS = 'MacOS'; Title = '🧩 Kustom (Tim)'; Items = $KustomItemsMac }
+}
 
 # ---------------------------------------------------------------------
 # MESIN LINUX/MACOS: jalankan perintah shell via file .sh sementara
 # ---------------------------------------------------------------------
 function Invoke-NixShellJob {
-    param([string]$Title, [string[]]$Cmds, [string]$Note, [switch]$Capture)
+    param([string]$Title, [string[]]$Cmds, [string]$Note, [switch]$Capture, $Item = $null)
     $tmpDir = if ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
     $stamp  = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $shPath = Join-Path $tmpDir ("ITTK-{0}.sh" -f [guid]::NewGuid().ToString('N'))
@@ -1797,6 +2048,7 @@ function Invoke-NixShellJob {
     # LF saja (CRLF merusak script bash) + tanpa BOM
     [System.IO.File]::WriteAllText($shPath, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
     try {
+        $needText = [bool]($Capture -or ($Item -and ($Item.Analysis -or $Item.PostRun)))
         if ($Capture) {
             Write-Output ''
             Write-Output ('=' * 70)
@@ -1805,6 +2057,16 @@ function Invoke-NixShellJob {
             $text = (& bash $shPath 2>&1 | Out-String)
             Write-Output $text
             if ($Note) { Write-Output ("Catatan: " + $Note) }
+            if ($Item -and $Item.Analysis) {
+                try { $recs = @(& $Item.Analysis $text) } catch { $recs = @() }
+                if ($recs.Count -gt 0) {
+                    Write-Output "`n=== REKOMENDASI ==="
+                    foreach ($r in $recs) { Write-Output ('  * ' + $r) }
+                }
+            }
+            if ($Item -and $Item.PostRun) {
+                try { & $Item.PostRun $text } catch { Write-Output ("Pasca-proses gagal: " + $_.Exception.Message) }
+            }
             Write-Output "=== SELESAI ==="
             return $text
         } else {
@@ -1812,8 +2074,24 @@ function Invoke-NixShellJob {
             Write-Host ('=' * 70) -ForegroundColor Cyan
             Write-Host (">> $Title   [$stamp]") -ForegroundColor Cyan
             Write-Host ('=' * 70) -ForegroundColor Cyan
-            & bash $shPath
+            $text = ''
+            if ($needText) {
+                $text = (& bash $shPath 2>&1 | Out-String)
+                Write-Host $text
+            } else {
+                & bash $shPath
+            }
             if ($Note) { Write-Host ("`nCatatan: " + $Note) -ForegroundColor Yellow }
+            if ($Item -and $Item.Analysis) {
+                try { $recs = @(& $Item.Analysis $text) } catch { $recs = @() }
+                if ($recs.Count -gt 0) {
+                    Write-Host "`n=== REKOMENDASI ===" -ForegroundColor Magenta
+                    foreach ($r in $recs) { Write-Host ('  * ' + $r) -ForegroundColor Yellow }
+                }
+            }
+            if ($Item -and $Item.PostRun) {
+                try { & $Item.PostRun $text } catch { Write-Host ("Pasca-proses gagal: " + $_.Exception.Message) -ForegroundColor Red }
+            }
             Write-Host "`n=== SELESAI ===" -ForegroundColor Green
         }
     } finally {
@@ -1861,9 +2139,11 @@ function Start-TerminalToolkit {
         if ($jdx -lt 0 -or $jdx -ge $cat.Items.Count) { continue }
         $item = $cat.Items[$jdx]
 
-        if ($item.Type -eq 'danger') {
-            $ok = Read-Host 'PERINTAH BERISIKO - lanjut? (y/t)'
-            if ($ok -notmatch '^[yY]$') { continue }
+        if ($item.Type -eq 'open') {
+            $opener = if ($osPlatform -eq 'Linux') { 'xdg-open' } else { 'open' }
+            try { & $opener $item.Target } catch { Write-Host ("Gagal membuka: " + $item.Target) -ForegroundColor Red }
+            Read-Host 'Enter untuk kembali ke menu'
+            continue
         }
         $values = @()
         $batal = $false
@@ -1882,7 +2162,13 @@ function Start-TerminalToolkit {
         }
         $cmds = $item.Cmds
         if ($item.Build) { $cmds = & $item.Build $values }
-        Invoke-NixShellJob -Title (Remove-Emoji $item.Name) -Cmds $cmds -Note $item.Note
+        if ($item.Type -eq 'danger') {
+            Write-Host "`nPerintah yang akan dijalankan:" -ForegroundColor Yellow
+            foreach ($c in $cmds) { Write-Host ('  > ' + $c) -ForegroundColor DarkYellow }
+            $ok = Read-Host 'PERINTAH BERISIKO - lanjut? (y/t)'
+            if ($ok -notmatch '^[yY]$') { continue }
+        }
+        Invoke-NixShellJob -Title (Remove-Emoji $item.Name) -Cmds $cmds -Note $item.Note -Item $item
         try { ("[" + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "] " + (Remove-Emoji $item.Name) + " :: " + ($cmds -join ' ; ')) | Add-Content -Path $logFile -Encoding UTF8 } catch {}
         Read-Host 'Enter untuk kembali ke menu'
     }
@@ -1976,7 +2262,7 @@ if ($Run) {
             Write-Output 'Perintah ini butuh input - jalankan lewat menu terminal.'
             exit 1
         }
-        Invoke-NixShellJob -Title (Remove-Emoji $nixItem.Name) -Cmds $nixItem.Cmds -Note $nixItem.Note -Capture | Write-Output
+        Invoke-NixShellJob -Title (Remove-Emoji $nixItem.Name) -Cmds $nixItem.Cmds -Note $nixItem.Note -Capture -Item $nixItem | Write-Output
         exit
     }
     $found = @()
@@ -2023,6 +2309,12 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # ---------------------------------------------------------------------
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+try {
+    Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name 'Win32Dpi' -Namespace 'ITTK' -ErrorAction SilentlyContinue | Out-Null
+    [void][ITTK.Win32Dpi]::SetProcessDPIAware()
+} catch {
+    # DPI awareness bersifat opsional pada OS lama.
+}
 
 # --- Single-instance: cegah terbuka ganda ---
 $mutexCreated = $false
@@ -2034,8 +2326,18 @@ if (-not $mutexCreated) {
 
 [Windows.Forms.Application]::EnableVisualStyles()
 
-$script:FontMono     = New-Object System.Drawing.Font('Consolas', 9)
-$script:FontMonoBold = New-Object System.Drawing.Font('Consolas', 9, [System.Drawing.FontStyle]::Bold)
+$script:DpiScale = 1.0
+try {
+    $bmpDpi = New-Object System.Drawing.Bitmap(1, 1)
+    $gDpi = [System.Drawing.Graphics]::FromImage($bmpDpi)
+    $script:DpiScale = [Math]::Max(1.0, ($gDpi.DpiX / 96.0))
+    $gDpi.Dispose(); $bmpDpi.Dispose()
+} catch {}
+function S { param([int]$Px) return [int][Math]::Round($Px * $script:DpiScale) }
+
+$script:OutputFontSize = 9
+$script:FontMono     = New-Object System.Drawing.Font('Consolas', $script:OutputFontSize)
+$script:FontMonoBold = New-Object System.Drawing.Font('Consolas', $script:OutputFontSize, [System.Drawing.FontStyle]::Bold)
 
 $script:Colors = @{
     check  = [System.Drawing.ColorTranslator]::FromHtml('#2B6CB0')  # biru
@@ -2254,6 +2556,83 @@ function Update-Jobs {
     }
 }
 
+function Show-DangerConfirm {
+    param([string]$Title, [string]$Desc, [string[]]$PreviewCmds, [bool]$WillAutoRP)
+    $f = New-Object Windows.Forms.Form
+    $f.Text = 'Konfirmasi Tindakan Berisiko'
+    $f.Size = New-Object System.Drawing.Size((S 620), (S 400))
+    $f.FormBorderStyle = 'FixedDialog'
+    $f.StartPosition = 'CenterParent'
+    $f.MaximizeBox = $false
+    $f.MinimizeBox = $false
+    $f.TopMost = $true
+    $f.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#1E1E1E')
+    $f.ForeColor = [System.Drawing.Color]::White
+    $f.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+
+    $lblHead = New-Object Windows.Forms.Label
+    $lblHead.Text = ('TINDAKAN BERISIKO: ' + (Remove-Emoji $Title))
+    $lblHead.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $lblHead.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#F48771')
+    $lblHead.Location = New-Object System.Drawing.Point((S 14), (S 12))
+    $lblHead.Size = New-Object System.Drawing.Size((S 576), (S 24))
+    $lblHead.UseMnemonic = $false
+
+    $lblDesc = New-Object Windows.Forms.Label
+    $rpMsg = if ($WillAutoRP) { 'Auto Restore Point AKTIF (titik rollback dibuat dulu).' } else { 'Auto Restore Point NONAKTIF.' }
+    $lblDesc.Text = ($Desc + "`r`n" + $rpMsg)
+    $lblDesc.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#D4D4D4')
+    $lblDesc.Location = New-Object System.Drawing.Point((S 14), (S 40))
+    $lblDesc.Size = New-Object System.Drawing.Size((S 576), (S 40))
+    $lblDesc.UseMnemonic = $false
+
+    $lblPrev = New-Object Windows.Forms.Label
+    $lblPrev.Text = 'Preview perintah yang akan dijalankan:'
+    $lblPrev.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#9CDCFE')
+    $lblPrev.Location = New-Object System.Drawing.Point((S 14), (S 86))
+    $lblPrev.AutoSize = $true
+
+    $box = New-Object Windows.Forms.TextBox
+    $box.Multiline = $true
+    $box.ReadOnly = $true
+    $box.ScrollBars = 'Both'
+    $box.WordWrap = $false
+    $box.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#141414')
+    $box.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#DCDCAA')
+    $box.Font = New-Object System.Drawing.Font('Consolas', 9)
+    $box.Location = New-Object System.Drawing.Point((S 14), (S 108))
+    $box.Size = New-Object System.Drawing.Size((S 576), (S 184))
+    $box.Text = ($PreviewCmds -join "`r`n")
+
+    $btnYes = New-Object Windows.Forms.Button
+    $btnYes.Text = 'Ya, Lanjutkan'
+    $btnYes.Location = New-Object System.Drawing.Point((S 364), (S 306))
+    $btnYes.Size = New-Object System.Drawing.Size((S 122), (S 34))
+    $btnYes.FlatStyle = 'Flat'
+    $btnYes.FlatAppearance.BorderSize = 0
+    $btnYes.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#C53030')
+    $btnYes.ForeColor = [System.Drawing.Color]::White
+    $btnYes.DialogResult = 'Yes'
+
+    $btnNo = New-Object Windows.Forms.Button
+    $btnNo.Text = 'Batal'
+    $btnNo.Location = New-Object System.Drawing.Point((S 494), (S 306))
+    $btnNo.Size = New-Object System.Drawing.Size((S 96), (S 34))
+    $btnNo.FlatStyle = 'Flat'
+    $btnNo.FlatAppearance.BorderSize = 1
+    $btnNo.FlatAppearance.BorderColor = [System.Drawing.ColorTranslator]::FromHtml('#555555')
+    $btnNo.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#3C3C3C')
+    $btnNo.ForeColor = [System.Drawing.Color]::White
+    $btnNo.DialogResult = 'Cancel'
+
+    $f.Controls.AddRange(@($lblHead, $lblDesc, $lblPrev, $box, $btnYes, $btnNo))
+    $f.AcceptButton = $btnNo
+    $f.CancelButton = $btnNo
+    $res = $f.ShowDialog($form)
+    $f.Dispose()
+    return ($res -eq 'Yes')
+}
+
 function Invoke-ToolkitItem {
     param($Item)
     # Buka aplikasi/panel
@@ -2268,22 +2647,9 @@ function Invoke-ToolkitItem {
         }
         return
     }
-    # Konfirmasi untuk perintah berisiko + auto restore point
-    if ($Item.Type -eq 'danger') {
-        $rpInfo = if ($script:chkAutoRP.Checked) { "`n`n(Restore point akan dibuat otomatis dulu - bisa di-rollback.)" } else { '' }
-        $r = [Windows.Forms.MessageBox]::Show(
-            "TINDAKAN BERISIKO`n`n$($Item.Name)`n`n$($Item.Desc)$rpInfo`n`nLanjutkan?",
-            'Konfirmasi', 'YesNo', 'Warning')
-        if ($r -ne 'Yes') { return }
-        if ($script:chkAutoRP.Checked) {
-            # Restore point otomatis: masuk antrean lebih dulu, baru perintah berisiko
-            $rpCmd = 'powershell -NoProfile -Command "Enable-ComputerRestore -Drive ''C:\'' -ErrorAction SilentlyContinue; reg add ''HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore'' /v SystemRestorePointCreationFrequency /t REG_DWORD /d 0 /f | Out-Null; try { Checkpoint-Computer -Description ''IT-Toolkit-TKITEM'' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; Write-Host ''Restore point berhasil dibuat (rollback tersedia via System Restore).'' } catch { Write-Host ''Restore point GAGAL dibuat - System Restore mungkin nonaktif di PC ini.''"'
-            $rpCmd = $rpCmd.Replace('TKITEM', (Remove-Emoji $Item.Name))
-            Invoke-Job -Title ('Auto Restore Point: ' + (Remove-Emoji $Item.Name)) -Cmds @($rpCmd) -Note '' -Kind 'check' -JobItem $null
-        }
-    }
-    # Minta input bila perlu
+    # Minta input bila perlu (dikumpulkan dulu agar dialog preview danger akurat)
     $values = @()
+    $maskedValues = @()
     if ($Item.Input) {
         foreach ($inp in $Item.Input) {
             $v = Show-InputBox -Title $Item.Name -Message $inp.Prompt -Default $inp.Default -Password:$inp.Password
@@ -2293,24 +2659,40 @@ function Invoke-ToolkitItem {
                 return
             }
             $values += $v
+            if ($inp.Password) { $maskedValues += '***' } else { $maskedValues += $v }
         }
     }
     $cmds = $Item.Cmds
-    if ($Item.Build) { $cmds = & $Item.Build $values }
+    $previewCmds = $Item.Cmds
+    if ($Item.Build) {
+        $cmds = & $Item.Build $values
+        $previewCmds = & $Item.Build $maskedValues
+    }
+    # Konfirmasi + preview perintah untuk tindakan berisiko + auto restore point
+    if ($Item.Type -eq 'danger') {
+        $ok = Show-DangerConfirm -Title $Item.Name -Desc $Item.Desc -PreviewCmds $previewCmds -WillAutoRP ([bool]$script:chkAutoRP.Checked)
+        if (-not $ok) { return }
+        if ($script:chkAutoRP.Checked) {
+            # Restore point otomatis: masuk antrean lebih dulu, baru perintah berisiko
+            $rpCmd = 'powershell -NoProfile -Command "Enable-ComputerRestore -Drive ''C:\'' -ErrorAction SilentlyContinue; reg add ''HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore'' /v SystemRestorePointCreationFrequency /t REG_DWORD /d 0 /f | Out-Null; try { Checkpoint-Computer -Description ''IT-Toolkit-TKITEM'' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; Write-Host ''Restore point berhasil dibuat (rollback tersedia via System Restore).'' } catch { Write-Host ''Restore point GAGAL dibuat - System Restore mungkin nonaktif di PC ini.''"'
+            $rpCmd = $rpCmd.Replace('TKITEM', (Remove-Emoji $Item.Name))
+            Invoke-Job -Title ('Auto Restore Point: ' + (Remove-Emoji $Item.Name)) -Cmds @($rpCmd) -Note '' -Kind 'check' -JobItem $null
+        }
+    }
     Invoke-Job -Title $Item.Name -Cmds $cmds -Note $Item.Note -Kind $Item.Type -JobItem $Item
 }
 
 function Add-ToolButton {
     param($Flow, $Item, [string]$TabTitle = '')
     $btn = New-Object Windows.Forms.Button
-    $btn.Size = '340,56'
+    $btn.Size = New-Object System.Drawing.Size((S 336), (S 58))
     $btn.FlatStyle = 'Flat'
     $btn.FlatAppearance.BorderSize = 0
     $btn.BackColor = $script:Colors[$Item.Type]
     $btn.ForeColor = [System.Drawing.Color]::White
     $btn.TextAlign = 'MiddleLeft'
-    $btn.Padding = '10,0,0,0'
-    $btn.Margin = '4,4,4,4'
+    $btn.Padding = New-Object Windows.Forms.Padding((S 10), 0, (S 6), 0)
+    $btn.Margin = New-Object Windows.Forms.Padding((S 4))
     $btn.Cursor = 'Hand'
     # GDI WinForms tidak mendukung emoji -> bersihkan dari nama tombol
     $cleanName = Remove-Emoji $Item.Name
@@ -2355,9 +2737,12 @@ function New-Tab {
 # BANGUN UI
 # ---------------------------------------------------------------------
 $form = New-Object Windows.Forms.Form
-$form.Text = "IT Support Toolkit — $env:COMPUTERNAME  [Administrator]"
-$form.Size = '1020,790'
-$form.MinimumSize = '900,650'
+$form.Text = "IT Support Toolkit v7.0 - $env:COMPUTERNAME  [Administrator]"
+$wa = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$defW = [Math]::Min((S 1090), ($wa.Width - 24))
+$defH = [Math]::Min((S 760), ($wa.Height - 24))
+$form.Size = New-Object System.Drawing.Size($defW, $defH)
+$form.MinimumSize = New-Object System.Drawing.Size([Math]::Min((S 900), ($wa.Width - 40)), [Math]::Min((S 620), ($wa.Height - 40)))
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#1E1E1E')
@@ -2382,11 +2767,12 @@ try {
 $script:tooltip = New-Object Windows.Forms.ToolTip
 $script:AllButtons = @()
 
-# --- Shortcut keyboard: Ctrl+F = fokus pencarian, Esc = bersihkan pencarian ---
+# --- Shortcut keyboard: Ctrl+F / Ctrl+K = fokus pencarian, Esc = bersihkan pencarian ---
 $form.KeyPreview = $true
 $form.Add_KeyDown({
-    if ($_.Control -and ($_.KeyCode -eq 'F')) {
+    if ($_.Control -and ($_.KeyCode -eq 'F' -or $_.KeyCode -eq 'K')) {
         $txtSearch.Focus()
+        $txtSearch.SelectAll()
         $_.Handled = $true
     } elseif ($_.KeyCode -eq 'Escape') {
         $txtSearch.Text = ''
@@ -2422,28 +2808,30 @@ foreach ($cat in $Categories) {
 Update-FavoritesTab
 
 # --- Tab bantuan ---
+$totalWinCmds = @($Categories | Where-Object { $_.Key -ne 'fav' } | ForEach-Object { $_.Items.Count } | Measure-Object -Sum).Sum
 $helpPage = New-Object Windows.Forms.TabPage
 $helpPage.Text = 'Bantuan'
 $helpPage.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#252526')
-$HelpText = @'
-IT SUPPORT TOOLKIT — PANDUAN SINGKAT
+$HelpText = @"
+IT SUPPORT TOOLKIT v7.0 - PANDUAN SINGKAT
 
 CARA PAKAI
   1. Pilih tab kategori di atas (Jaringan, Sistem, Disk, dll).
   2. Klik tombol perintah -> langsung dijalankan lewat CMD.
-  3. Hasil muncul di panel bawah (bisa disalin / disimpan sebagai log).
+  3. Hasil muncul di panel bawah (bisa disalin, disalin dalam format tiket, atau disimpan sebagai log).
   4. Proses yang masih jalan terlihat di bar bawah sampai "Selesai".
-  5. Ketik di kotak pencarian untuk memfilter 160+ tombol perintah.
+  5. Ketik di kotak pencarian untuk memfilter $totalWinCmds perintah lintas semua tab sekaligus.
   6. Klik kanan tombol perintah -> "Pin ke Favorit" -> muncul di tab Favorit.
-  7. CPU & RAM dipantau live di pojok kanan bawah.
-  8. Ctrl+F = fokus pencarian, Esc = bersihkan pencarian.
-  9. Centang "Mode Aman" (panel bawah) untuk menyembunyikan tombol merah
+  7. CPU & RAM dipantau live di pojok kanan bawah (menyesuaikan lebar window).
+  8. Ctrl+F / Ctrl+K = fokus pencarian, Esc = bersihkan pencarian.
+  9. Gunakan tombol A- / A+ di toolbar bawah untuk mengubah ukuran font output.
+ 10. Centang "Mode Aman" (panel bawah) untuk menonaktifkan seluruh tombol merah
      saat toolkit dipinjamkan ke teknisi junior / didemokan ke client.
 
 LEGENDA WARNA TOMBOL
   Biru    = Cek / Diagnosa (aman, tidak mengubah apa pun)
   Oranye  = Perbaikan (langsung mengeksekusi fix)
-  Merah   = Berisiko (muncul konfirmasi dulu)
+  Merah   = Berisiko (tampil dialog konfirmasi + preview perintah sebelum jalan)
   Hijau   = Membuka aplikasi / pengaturan Windows
 
 CATATAN PENTING
@@ -2482,7 +2870,7 @@ TIPS CEPAT
   * Windows bermasalah?       -> Sistem: DISM lalu SFC.
   * Update gagal terus?       -> Update: Reset Cache Windows Update.
   * Dokumen print nyangkut?   -> Printer: Kosongkan Antrian Print.
-'@
+"@
 $helpBox = New-Object Windows.Forms.RichTextBox
 $helpBox.Dock = 'Fill'
 $helpBox.ReadOnly = $true
@@ -2496,7 +2884,7 @@ $tabs.TabPages.Add($helpPage)
 # --- Panel output bawah ---
 $outPanel = New-Object Windows.Forms.Panel
 $outPanel.Dock = 'Bottom'
-$outPanel.Height = 330
+$outPanel.Height = S 285
 $outPanel.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#1E1E1E')
 
 $outBox = New-Object Windows.Forms.RichTextBox
@@ -2505,46 +2893,93 @@ $outBox.ReadOnly = $true
 $outBox.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#141414')
 $outBox.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#D4D4D4')
 $outBox.Font = $script:FontMono
-$outBox.Text = "Selamat datang di IT Support Toolkit.`r`nPilih tab di atas, lalu klik tombol perintah — langsung dijalankan via CMD.`r`nPerintah berat berjalan di background, pantau di bar bawah.`r`n"
+$outBox.Text = "Selamat datang di IT Support Toolkit.`r`nPilih tab di atas, lalu klik tombol perintah - langsung dijalankan via CMD.`r`nPerintah berat berjalan di background, pantau di bar bawah.`r`n"
 
 $outToolbar = New-Object Windows.Forms.Panel
 $outToolbar.Dock = 'Top'
-$outToolbar.Height = 64
+$outToolbar.Height = S 72
 $outToolbar.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#2D2D30')
 
+$tbRow1 = New-Object Windows.Forms.FlowLayoutPanel
+$tbRow1.Dock = 'Top'
+$tbRow1.Height = S 38
+$tbRow1.WrapContents = $false
+$tbRow1.AutoScroll = $false
+$tbRow1.Padding = New-Object Windows.Forms.Padding((S 8), (S 4), (S 8), 0)
+$tbRow1.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#2D2D30')
+
+$tbRow2 = New-Object Windows.Forms.FlowLayoutPanel
+$tbRow2.Dock = 'Fill'
+$tbRow2.WrapContents = $false
+$tbRow2.AutoScroll = $false
+$tbRow2.Padding = New-Object Windows.Forms.Padding((S 10), (S 2), (S 8), (S 2))
+$tbRow2.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#2D2D30')
+
 function New-SmallButton {
-    param([string]$Text, [int]$X, [int]$W = 130)
+    param([string]$Text, [int]$X = 0, [int]$W = 0, [int]$Y = 0, [int]$H = 28)
     $b = New-Object Windows.Forms.Button
     $b.Text = $Text
-    $b.Location = "$X,5"
-    $b.Size = "$W,28"
+    if ($W -gt 0) {
+        $b.Location = New-Object System.Drawing.Point((S $X), (S $Y))
+        $b.Size = New-Object System.Drawing.Size((S $W), (S $H))
+    } else {
+        $b.AutoSize = $true
+        $b.AutoSizeMode = 'GrowAndShrink'
+        $b.MinimumSize = New-Object System.Drawing.Size(0, (S $H))
+        $b.Padding = New-Object Windows.Forms.Padding((S 8), 0, (S 8), 0)
+        $b.Margin = New-Object Windows.Forms.Padding(0, 0, (S 6), 0)
+    }
     $b.FlatStyle = 'Flat'
     $b.FlatAppearance.BorderSize = 1
     $b.FlatAppearance.BorderColor = [System.Drawing.ColorTranslator]::FromHtml('#555555')
     $b.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#3C3C3C')
     $b.ForeColor = [System.Drawing.Color]::White
+    $b.UseMnemonic = $false
     $b.Cursor = 'Hand'
     return $b
 }
-$btnCopy    = New-SmallButton -Text 'Salin Output'  -X 10  -W 100
-$btnSave    = New-SmallButton -Text 'Simpan Log'    -X 116 -W 94
-$btnClear   = New-SmallButton -Text 'Bersihkan'     -X 216 -W 88
-$btnOpenLog = New-SmallButton -Text 'Buka Log'      -X 310 -W 84
-$btnHist    = New-SmallButton -Text 'Riwayat'       -X 400 -W 78
-$btnCancel  = New-SmallButton -Text 'Batalkan'      -X 484 -W 86
+$btnCopy    = New-SmallButton -Text 'Salin Output'
+$btnTicket  = New-SmallButton -Text 'Salin Tiket'
+$btnSave    = New-SmallButton -Text 'Simpan Log'
+$btnClear   = New-SmallButton -Text 'Bersihkan'
+$btnOpenLog = New-SmallButton -Text 'Buka Log'
+$btnHist    = New-SmallButton -Text 'Riwayat'
+$btnCancel  = New-SmallButton -Text 'Batalkan'
 $btnCancel.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#A63C3C')
+$btnExpSet  = New-SmallButton -Text 'Export Setelan'
+$btnImpSet  = New-SmallButton -Text 'Import Setelan'
+
 $script:chkAutoRP = New-Object Windows.Forms.CheckBox
 $script:chkAutoRP.Text = 'Auto Restore Point (sebelum perintah berisiko)'
-$script:chkAutoRP.Location = '14,36'
 $script:chkAutoRP.AutoSize = $true
 $script:chkAutoRP.Checked = $true
 $script:chkAutoRP.ForeColor = [System.Drawing.Color]::White
+$script:chkAutoRP.Margin = New-Object Windows.Forms.Padding(0, (S 4), (S 16), 0)
 $script:chkSafe = New-Object Windows.Forms.CheckBox
-$script:chkSafe.Text = 'Mode Aman (sembunyikan tombol berisiko)'
-$script:chkSafe.Location = '320,36'
+$script:chkSafe.Text = 'Mode Aman (nonaktifkan tombol berisiko)'
 $script:chkSafe.AutoSize = $true
 $script:chkSafe.Checked = $false
 $script:chkSafe.ForeColor = [System.Drawing.Color]::White
+$script:chkSafe.Margin = New-Object Windows.Forms.Padding(0, (S 4), (S 18), 0)
+$lblZoom = New-Object Windows.Forms.Label
+$lblZoom.Text = 'Font:'
+$lblZoom.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#CCCCCC')
+$lblZoom.AutoSize = $true
+$lblZoom.Margin = New-Object Windows.Forms.Padding(0, (S 6), (S 4), 0)
+$btnZoomOut = New-SmallButton -Text 'A-' -H 24
+$btnZoomIn  = New-SmallButton -Text 'A+' -H 24
+function Update-OutputFont {
+    param([int]$Delta)
+    $next = [Math]::Max(8, [Math]::Min(16, $script:OutputFontSize + $Delta))
+    if ($next -eq $script:OutputFontSize) { return }
+    $script:OutputFontSize = $next
+    $script:FontMono     = New-Object System.Drawing.Font('Consolas', $script:OutputFontSize)
+    $script:FontMonoBold = New-Object System.Drawing.Font('Consolas', $script:OutputFontSize, [System.Drawing.FontStyle]::Bold)
+    $outBox.Font = $script:FontMono
+    $script:StatusLabel.Text = ('Ukuran font output: ' + $script:OutputFontSize + ' pt')
+}
+$btnZoomOut.Add_Click({ Update-OutputFont -Delta -1 })
+$btnZoomIn.Add_Click({ Update-OutputFont -Delta 1 })
 $script:chkSafe.Add_Click({
     # Catatan: hanya menyentuh tombol di tab yang sedang aktif (handle-nya pasti
     # sudah dibuat). Tab lain diterapkan saat dipilih via SelectedIndexChanged -
@@ -2571,8 +3006,6 @@ $tabs.Add_SelectedIndexChanged({
         # Terapkan Mode Aman saat ganti tab bersifat best-effort.
     }
 })
-$btnExpSet = New-SmallButton -Text 'Export Setelan' -X 576 -W 112
-$btnImpSet = New-SmallButton -Text 'Import Setelan' -X 694 -W 112
 $btnExpSet.Add_Click({
     $files = @('favorit.json', 'posisi.json', 'kustom.json') | ForEach-Object { Join-Path $script:AppRoot $_ } | Where-Object { Test-Path $_ }
     if ($files.Count -eq 0) { $script:StatusLabel.Text = 'Belum ada setelan untuk diekspor'; return }
@@ -2639,6 +3072,20 @@ $btnCopy.Add_Click({
         $script:StatusLabel.Text = 'Output disalin ke clipboard'
     } catch { $script:StatusLabel.Text = 'Gagal menyalin output' }
 })
+$btnTicket.Add_Click({
+    try {
+        $osCap = try { (Get-CimInstance Win32_OperatingSystem -Property Caption,Version -ErrorAction Stop).Caption } catch { 'Windows' }
+        $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        $ticket = "### Ringkasan Diagnosa IT Support`r`n" +
+                  "- **Host**: ``$env:COMPUTERNAME```r`n" +
+                  "- **User**: ``$env:USERNAME```r`n" +
+                  "- **OS**: $osCap`r`n" +
+                  "- **Waktu**: $stamp`r`n`r`n" +
+                  "``````text`r`n" + $outBox.Text.Trim() + "`r`n```````r`n"
+        [Windows.Forms.Clipboard]::SetText($ticket)
+        $script:StatusLabel.Text = 'Ringkasan format tiket disalin ke clipboard (siap tempel ke Jira/Freshdesk/GLPI)'
+    } catch { $script:StatusLabel.Text = 'Gagal menyalin format tiket' }
+})
 $btnSave.Add_Click({
     $dlg = New-Object Windows.Forms.SaveFileDialog
     $dlg.Filter = 'Text File (*.txt)|*.txt'
@@ -2649,7 +3096,10 @@ $btnSave.Add_Click({
     }
 })
 $btnClear.Add_Click({ $outBox.Clear(); $script:StatusLabel.Text = 'Output dibersihkan' })
-$outToolbar.Controls.AddRange(@($btnCopy, $btnSave, $btnClear, $btnOpenLog, $btnHist, $btnCancel, $script:chkAutoRP, $script:chkSafe, $btnExpSet, $btnImpSet))
+$tbRow1.Controls.AddRange(@($btnCopy, $btnTicket, $btnSave, $btnClear, $btnOpenLog, $btnHist, $btnCancel, $btnExpSet, $btnImpSet))
+$tbRow2.Controls.AddRange(@($script:chkAutoRP, $script:chkSafe, $lblZoom, $btnZoomOut, $btnZoomIn))
+$outToolbar.Controls.Add($tbRow2)
+$outToolbar.Controls.Add($tbRow1)
 
 $outPanel.Controls.Add($outBox)      # diproses terakhir (fill sisa)
 $outPanel.Controls.Add($outToolbar)  # diproses duluan (dock top)
@@ -2657,22 +3107,27 @@ $outPanel.Controls.Add($outToolbar)  # diproses duluan (dock top)
 # --- Status bar ---
 $statusPanel = New-Object Windows.Forms.Panel
 $statusPanel.Dock = 'Bottom'
-$statusPanel.Height = 28
+$statusPanel.Height = S 28
 $statusPanel.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#007ACC')
 $script:StatusLabel = New-Object Windows.Forms.Label
-$script:StatusLabel.Text = 'Siap — pilih perintah di tab atas'
+$script:StatusLabel.Text = 'Siap - pilih perintah di tab atas'
 $script:StatusLabel.ForeColor = [System.Drawing.Color]::White
 $script:StatusLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9)
-$script:StatusLabel.Location = '10,5'
-$script:StatusLabel.AutoSize = $true
-$statusPanel.Controls.Add($script:StatusLabel)
+$script:StatusLabel.Dock = 'Fill'
+$script:StatusLabel.TextAlign = 'MiddleLeft'
+$script:StatusLabel.Padding = New-Object Windows.Forms.Padding((S 10), 0, 0, 0)
+$script:StatusLabel.UseMnemonic = $false
 
-# --- Meter CPU/RAM live (kanan status bar) ---
+# --- Meter CPU/RAM live (selalu menempel di kanan saat window di-resize/maximize) ---
 $script:StatusPerf = New-Object Windows.Forms.Label
 $script:StatusPerf.Text = 'CPU --%  |  RAM -- GB'
 $script:StatusPerf.ForeColor = [System.Drawing.Color]::White
-$script:StatusPerf.Location = '830,6'
+$script:StatusPerf.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$script:StatusPerf.Dock = 'Right'
 $script:StatusPerf.AutoSize = $true
+$script:StatusPerf.TextAlign = 'MiddleRight'
+$script:StatusPerf.Padding = New-Object Windows.Forms.Padding((S 8), 0, (S 12), 0)
+$statusPanel.Controls.Add($script:StatusLabel)
 $statusPanel.Controls.Add($script:StatusPerf)
 
 $perfTimer = New-Object Windows.Forms.Timer
@@ -2693,58 +3148,109 @@ $perfTimer.Start()
 # --- Header ---
 $header = New-Object Windows.Forms.Panel
 $header.Dock = 'Top'
-$header.Height = 52
+$header.Height = S 46
 $header.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#202020')
 $lbTitle = New-Object Windows.Forms.Label
 $lbTitle.Text = 'IT SUPPORT TOOLKIT'
 $lbTitle.Font = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
 $lbTitle.ForeColor = [System.Drawing.Color]::White
-$lbTitle.Location = '14,10'
+$lbTitle.Location = New-Object System.Drawing.Point((S 14), (S 9))
 $lbTitle.AutoSize = $true
 $header.Controls.Add($lbTitle)
 
-# --- Strip pencarian perintah (panel terpisah agar render pasti muncul) ---
-$searchPanel = New-Object Windows.Forms.Panel
+# --- Strip pencarian perintah lintas-tab terpadu ---
+$searchTabPair = New-Tab -Title 'Hasil Cari' -Intro ''
+$script:SearchPage = $searchTabPair[0]
+$script:SearchFlow = $searchTabPair[1]
+$script:PrevTabBeforeSearch = $null
+
+$searchPanel = New-Object Windows.Forms.FlowLayoutPanel
 $searchPanel.Dock = 'Top'
-$searchPanel.Height = 40
+$searchPanel.Height = S 42
+$searchPanel.WrapContents = $false
+$searchPanel.Padding = New-Object Windows.Forms.Padding((S 12), (S 7), (S 10), (S 4))
 $searchPanel.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#2D2D30')
 $lbSearch = New-Object Windows.Forms.Label
 $lbSearch.Text = 'Cari perintah:'
 $lbSearch.ForeColor = [System.Drawing.Color]::White
-$lbSearch.Location = '14,11'
 $lbSearch.AutoSize = $true
+$lbSearch.Margin = New-Object Windows.Forms.Padding(0, (S 4), (S 8), 0)
 $txtSearch = New-Object Windows.Forms.TextBox
-$txtSearch.Location = '110,8'
-$txtSearch.Size = '320,26'
-$script:tooltip.SetToolTip($txtSearch, 'Ketik nama perintah, mis. dns / printer / sfc / wifi — hasil difilter otomatis')
-$searchPanel.Controls.AddRange(@($lbSearch, $txtSearch))
+$txtSearch.Width = S 300
+$txtSearch.Margin = New-Object Windows.Forms.Padding(0, (S 1), (S 12), 0)
+$lbSearchHint = New-Object Windows.Forms.Label
+$lbSearchHint.Text = 'Ctrl+F / Ctrl+K fokus  |  Esc bersihkan (hasil lintas semua tab)'
+$lbSearchHint.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#9CDCFE')
+$lbSearchHint.AutoSize = $true
+$lbSearchHint.Margin = New-Object Windows.Forms.Padding(0, (S 4), 0, 0)
+$script:tooltip.SetToolTip($txtSearch, 'Ketik kata kunci, mis. dns / office / teams / printer / wifi - hasil semua tab tampil sekaligus')
+$searchPanel.Controls.AddRange(@($lbSearch, $txtSearch, $lbSearchHint))
 $txtSearch.Add_TextChanged({
     $q = $txtSearch.Text.Trim().ToLower()
+    if ($q.Length -eq 0) {
+        if ($tabs.TabPages.Contains($script:SearchPage)) {
+            $tabs.TabPages.Remove($script:SearchPage)
+        }
+        if ($script:PrevTabBeforeSearch -and $tabs.TabPages.Contains($script:PrevTabBeforeSearch)) {
+            $tabs.SelectedTab = $script:PrevTabBeforeSearch
+        }
+        $script:PrevTabBeforeSearch = $null
+        $script:StatusLabel.Text = 'Siap - pilih perintah di tab atas'
+        return
+    }
+    if (-not $script:PrevTabBeforeSearch -and $tabs.SelectedTab -ne $script:SearchPage) {
+        $script:PrevTabBeforeSearch = $tabs.SelectedTab
+    }
+    $script:SearchFlow.SuspendLayout()
+    $script:SearchFlow.Controls.Clear()
+    $seen = @{}
     $matchedTabs = @()
     $n = 0
-    $firstBtn = $null
     foreach ($b in $script:AllButtons) {
-        $vis = ($q.Length -eq 0) -or ($b.Tag._search.Contains($q))
-        $b.Visible = $vis
-        if ($vis -and $q.Length -gt 0) {
-            $n++
-            if ($matchedTabs -notcontains $b.Tag._tab) { $matchedTabs += $b.Tag._tab }
-            if (-not $firstBtn) { $firstBtn = $b }
-        }
+        $it = $b.Tag
+        if (-not $it -or $it._tab -eq 'Favorit') { continue }
+        if (-not $it._search.Contains($q)) { continue }
+        if ($seen.ContainsKey($it.Name)) { continue }
+        $seen[$it.Name] = $true
+        $n++
+        if ($matchedTabs -notcontains $it._tab) { $matchedTabs += $it._tab }
+
+        $sb = New-Object Windows.Forms.Button
+        $sb.Size = New-Object System.Drawing.Size((S 336), (S 58))
+        $sb.FlatStyle = 'Flat'
+        $sb.FlatAppearance.BorderSize = 0
+        $sb.BackColor = $script:Colors[$it.Type]
+        $sb.ForeColor = [System.Drawing.Color]::White
+        $sb.TextAlign = 'MiddleLeft'
+        $sb.Padding = New-Object Windows.Forms.Padding((S 10), 0, (S 6), 0)
+        $sb.Margin = New-Object Windows.Forms.Padding((S 4))
+        $sb.Cursor = 'Hand'
+        $sb.UseMnemonic = $false
+        $sb.Text = '[' + $it._tab + '] ' + (Remove-Emoji $it.Name) + "`n" + $it.Desc
+        $sb.Tag = $it
+        if ($it.Type -eq 'danger' -and $script:chkSafe.Checked) { $sb.Enabled = $false }
+        $script:tooltip.SetToolTip($sb, ($it._tab + ' -> ' + $it.Desc))
+        $sb.Add_Click({ Invoke-ToolkitItem $this.Tag })
+        $sb.ContextMenuStrip = $script:cmBtn
+        $script:SearchFlow.Controls.Add($sb)
     }
-    if ($q.Length -gt 0) {
-        if ($n -eq 0) {
-            $script:StatusLabel.Text = 'Tidak ada perintah yang cocok'
-        } else {
-            # Catatan: properti Visible tombol di tab non-aktif selalu false,
-            # jadi tab tujuan dilacak sendiri lewat $firstBtn (bukan Visible).
-            $target = $tabs.TabPages | Where-Object { $_.Text -eq $firstBtn.Tag._tab } | Select-Object -First 1
-            if ($target) { $tabs.SelectedTab = $target }
-            $script:StatusLabel.Text = ('' + $n + ' perintah cocok di tab: ' + ($matchedTabs -join ', '))
-        }
+    if ($n -eq 0) {
+        $lbEmpty = New-Object Windows.Forms.Label
+        $lbEmpty.Text = ('Tidak ada perintah yang cocok dengan "' + $txtSearch.Text.Trim() + '". Tekan Esc untuk membersihkan filter.')
+        $lbEmpty.AutoSize = $true
+        $lbEmpty.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#CE9178')
+        $lbEmpty.Margin = New-Object Windows.Forms.Padding((S 6), (S 10), (S 6), (S 10))
+        $script:SearchFlow.Controls.Add($lbEmpty)
+        $script:StatusLabel.Text = 'Tidak ada perintah yang cocok'
     } else {
-        $script:StatusLabel.Text = 'Siap — pilih perintah di tab atas'
+        $script:StatusLabel.Text = ('' + $n + ' perintah cocok lintas ' + $matchedTabs.Count + ' tab: ' + ($matchedTabs -join ', '))
     }
+    $script:SearchPage.Text = ('Hasil Cari (' + $n + ')')
+    if (-not $tabs.TabPages.Contains($script:SearchPage)) {
+        $tabs.TabPages.Insert(0, $script:SearchPage)
+    }
+    $tabs.SelectedTab = $script:SearchPage
+    $script:SearchFlow.ResumeLayout()
 })
 
 # --- Timer job ---

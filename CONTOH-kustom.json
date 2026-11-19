@@ -3,15 +3,26 @@
     "Name": "🏢 Contoh: Backup Folder ke Server",
     "Desc": "Salin C:\\Data ke share server kantor (ganti sesuai kebutuhan)",
     "Type": "fix",
+    "OS": "Windows",
     "Cmds": [
       "robocopy \"C:\\Data\" \"\\\\SERVER-KANTOR\\Backup\\%COMPUTERNAME%\" /MIR /R:1 /W:1"
     ],
-    "Note": "Contoh perintah kustom tim. Salin file ini menjadi kustom.json lalu edit isinya."
+    "Note": "Contoh perintah kustom tim Windows. Salin file ini menjadi kustom.json lalu edit isinya."
   },
   {
     "Name": "🏢 Contoh: Buka Aplikasi Kantor",
     "Desc": "Contoh tombol open untuk aplikasi internal",
     "Type": "open",
+    "OS": "Windows",
     "Target": "notepad.exe"
+  },
+  {
+    "Name": "🐧 Contoh: Cek Service Internal (Linux)",
+    "Desc": "Contoh perintah kustom tim untuk menu terminal Linux",
+    "Type": "check",
+    "OS": "Linux",
+    "Cmds": [
+      "systemctl status nginx --no-pager || true"
+    ]
   }
 ]
