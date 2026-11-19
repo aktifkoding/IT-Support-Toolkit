@@ -1,0 +1,23 @@
+# Log eksekusi dan hasil audit lokal
+Logs/
+*.log
+AUDIT-Report.txt
+
+# Preferensi lokal dan state jendela
+favorit.json
+posisi.json
+
+# Konfigurasi perintah kustom internal tim (salin dari CONTOH-kustom.json)
+kustom.json
+
+# Output build opsional dari BUAT-EXE.ps1
+*.exe
+
+# Arsip ekspor setelan
+IT-Toolkit-Setelan-*.zip
+
+# File sistem dan editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
